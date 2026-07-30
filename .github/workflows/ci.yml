@@ -127,8 +127,12 @@ jobs:
               || echo "::warning::repo is not pip-installable; continuing on requirements.txt alone"
           fi
           python -m pytest --version >/dev/null 2>&1 || pip install --quiet pytest
+          # Write the manifest to a file before trimming it. Piping pip straight into `head` closes
+          # the pipe early, pip exits 120 on the broken pipe, and `pipefail` makes that the step's
+          # exit code — a logging line failing the build.
           echo "Installed into .ci-venv:"
-          pip list --format=freeze | head -40
+          pip list --format=freeze > .ci-venv/installed.txt 2>/dev/null || true
+          head -40 .ci-venv/installed.txt || true
 
       - name: Run tests
         if: steps.detect.outputs.kind != 'none'
