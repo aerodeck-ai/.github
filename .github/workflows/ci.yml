@@ -23,11 +23,13 @@ on:
     inputs:
       runner:
         description: >-
-          Runner label. Defaults to the org self-hosted pool (aeros-runner-1 / mac-mini-runner-1 /
-          personal-runner-1, all registered org-level so any repo can use them without per-repo
-          registration). Pass 'ubuntu-latest' for a repo that must run on GitHub-hosted.
+          Runner label. Defaults to 'ci-aeros' — the Linux business CI box — NOT the bare
+          'self-hosted' label, which matches all three org runners including mac-mini-runner-1 and
+          personal-runner-1. 'personal' is the LIFE host and business CI must not schedule onto it.
+          Override only when a repo genuinely needs another box: 'mac-mini' for macOS-only work,
+          'ubuntu-latest' for GitHub-hosted.
         type: string
-        default: self-hosted
+        default: ci-aeros
         required: false
       node-version:
         type: string
@@ -94,10 +96,50 @@ jobs:
         shell: bash
         run: npm ci || npm install
 
+      # Python dependency install. Without this a Python repo runs pytest against whatever happens
+      # to be on the runner, so a missing dependency reads as a test failure and a shared runner
+      # slowly accumulates every repo's packages. Everything goes into a per-job venv, never the
+      # runner's system Python — the runner is shared across all repos and must stay clean.
+      # The venv is named with a leading dot so pytest's default norecursedirs ('.*') skips it.
+      - name: Install (python)
+        if: steps.detect.outputs.kind == 'python' || steps.detect.outputs.kind == 'explicit'
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ ! -f requirements.txt ] && [ ! -f pyproject.toml ] && [ ! -f setup.py ]; then
+            echo "No Python dependency manifest; skipping install."
+            exit 0
+          fi
+          python3 -m venv .ci-venv || { echo "::error::could not create venv"; exit 1; }
+          . .ci-venv/bin/activate
+          python -m pip install --upgrade pip --quiet
+          # requirements.txt is an explicit declaration of what this repo needs. If it cannot be
+          # installed, the suite cannot be trusted, so fail here rather than let pytest report a
+          # misleading ImportError as though it were a test result.
+          if [ -f requirements.txt ]; then
+            pip install --quiet -r requirements.txt || { echo "::error::requirements.txt install failed"; exit 1; }
+          fi
+          # A pyproject/setup.py may be config-only (ruff, black) rather than an installable
+          # package, so a failure here is a warning, not a verdict.
+          if [ -f pyproject.toml ] || [ -f setup.py ]; then
+            pip install --quiet -e . 2>/dev/null \
+              || pip install --quiet . 2>/dev/null \
+              || echo "::warning::repo is not pip-installable; continuing on requirements.txt alone"
+          fi
+          python -m pytest --version >/dev/null 2>&1 || pip install --quiet pytest
+          # Write the manifest to a file before trimming it. Piping pip straight into `head` closes
+          # the pipe early, pip exits 120 on the broken pipe, and `pipefail` makes that the step's
+          # exit code — a logging line failing the build.
+          echo "Installed into .ci-venv:"
+          pip list --format=freeze > .ci-venv/installed.txt 2>/dev/null || true
+          head -40 .ci-venv/installed.txt || true
+
       - name: Run tests
         if: steps.detect.outputs.kind != 'none'
         shell: bash
-        run: ${{ steps.detect.outputs.cmd }}
+        run: |
+          if [ -d .ci-venv ]; then . .ci-venv/bin/activate; fi
+          ${{ steps.detect.outputs.cmd }}
 
       # The honest-board step. No suite => this is NOT a pass.
       - name: No suite — report UNTESTED
