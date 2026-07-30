@@ -64,3 +64,5 @@ Three runners are registered **org-level**, so any repo can use them without per
 | `aeros-runner-1` | aeros (systemd service, work dir on `/mnt/data`) |
 | `mac-mini-runner-1` | mac mini |
 | `personal-runner-1` | personal |
+
+<!-- push-auth verified via gh credential helper 2026-07-30 -->
