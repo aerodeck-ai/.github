@@ -1,0 +1,117 @@
+name: Shared CI
+
+# WHY THIS EXISTS (2026-07-30)
+#
+# Measured across all 66 repos in aerodeck-ai on 2026-07-30: 22 had workflows, 44 had none, and
+# ZERO shared anything. aerodeck-template alone carried 29 workflow files, hermes-agent 22. Every
+# repo hand-rolled its own CI, so a fix to one never reached the others.
+#
+# The alternative that was rejected: a `test-if-present` gate installed in all 66. That reports
+# green when nothing ran, so a repo with no tests renders identically to one whose suite passed —
+# the fail-open pattern that has repeatedly produced "green check that can't see failure" defects
+# in this estate. This workflow refuses to do that: when a repo has no runnable suite it reports
+# UNTESTED and fails the job unless the repo has explicitly declared itself untested. A repo is
+# never silently green.
+#
+# Called by a repo with:
+#   jobs:
+#     ci:
+#       uses: aerodeck-ai/.github/.github/workflows/ci.yml@main
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          Runner label. Defaults to the org self-hosted pool (aeros-runner-1 / mac-mini-runner-1 /
+          personal-runner-1, all registered org-level so any repo can use them without per-repo
+          registration). Pass 'ubuntu-latest' for a repo that must run on GitHub-hosted.
+        type: string
+        default: self-hosted
+        required: false
+      node-version:
+        type: string
+        default: '22'
+        required: false
+      test-command:
+        description: >-
+          Override the auto-detected test command. Only set this when detection gets it wrong —
+          an explicit wrong command is worse than no command, because it can pass vacuously.
+        type: string
+        default: ''
+        required: false
+      declared-untested:
+        description: >-
+          Set true ONLY for a repo that genuinely has no suite and is knowingly unproven. The job
+          then reports UNTESTED and succeeds, so the board stays honest without going red forever.
+          This is a deliberate, visible, per-repo admission — not a default.
+        type: boolean
+        default: false
+        required: false
+
+jobs:
+  test:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Detect rather than assume. A repo with no package.json and no pyproject.toml has no suite
+      # this workflow knows how to run, and saying so is the point.
+      - name: Detect suite
+        id: detect
+        shell: bash
+        run: |
+          set -uo pipefail
+          cmd=""
+          kind="none"
+          if [ -n "${{ inputs.test-command }}" ]; then
+            cmd="${{ inputs.test-command }}"; kind="explicit"
+          elif [ -f package.json ]; then
+            # `npm test` with no test script exits 1 on modern npm, but older/odd setups emit the
+            # "no test specified" stub and exit 0 — the exact vacuous pass this file exists to stop.
+            # So read the script rather than trusting the exit code.
+            script="$(node -p "require('./package.json').scripts?.test || ''" 2>/dev/null || echo '')"
+            case "$script" in
+              ''|*'no test specified'*) kind="none" ;;
+              *) cmd="npm test"; kind="node" ;;
+            esac
+          elif [ -f pyproject.toml ] || [ -f pytest.ini ] || [ -d tests ]; then
+            cmd="python -m pytest -q"; kind="python"
+          fi
+          echo "cmd=$cmd"   >> "$GITHUB_OUTPUT"
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "Detected: kind=$kind cmd=${cmd:-<none>}"
+
+      - name: Setup Node
+        if: steps.detect.outputs.kind == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install (node)
+        if: steps.detect.outputs.kind == 'node'
+        shell: bash
+        run: npm ci || npm install
+
+      - name: Run tests
+        if: steps.detect.outputs.kind != 'none'
+        shell: bash
+        run: ${{ steps.detect.outputs.cmd }}
+
+      # The honest-board step. No suite => this is NOT a pass.
+      - name: No suite — report UNTESTED
+        if: steps.detect.outputs.kind == 'none'
+        shell: bash
+        run: |
+          echo "### UNTESTED" >> "$GITHUB_STEP_SUMMARY"
+          echo "No runnable test suite was detected in this repository." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.declared-untested }}" = "true" ]; then
+            echo "This repo has explicitly declared itself untested (declared-untested: true)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Recorded as a known state, not as a passing suite." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Failing deliberately: a green tick here would be indistinguishable from a passing suite." >> "$GITHUB_STEP_SUMMARY"
+          echo "Either add a suite, or set 'declared-untested: true' in the caller to record this repo as knowingly unproven." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
