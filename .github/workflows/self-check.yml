@@ -2,10 +2,20 @@ name: self-check
 
 # Wires this repo's own control-plane-integrity gate onto itself, so this
 # repo (the org's sole enforcement mechanism for all 66 others) cannot be
-# self-altered any more freely than the repos it protects. Bootstraps
-# against @main the same way every calling repo does — this PR's own run
-# won't see itself until it merges, matching the existing pattern (ci.yml's
-# own header documents the identical bootstrap shape).
+# self-altered any more freely than the repos it protects.
+#
+# Uses a LOCAL path ref (./...) rather than @main: this workflow lives in
+# the SAME repo as control-plane-integrity.yml, and a local ref resolves
+# against the calling ref (this PR's own commit), not against main. An
+# @main ref cannot work here before this PR's first merge — main doesn't
+# have control-plane-integrity.yml yet, so that ref would 404 forever
+# until merge, meaning self-check would never actually run pre-merge. This
+# was caught live: the first two attempts used @main and both runs
+# completed with zero jobs ("workflow file issue") instead of exercising
+# the checker, silently NOT wargaming the gate despite looking like a
+# pass/fail check-run. Local ref lets this PR validate itself before merge,
+# same intent as ci.yml's bootstrap note but the mechanism that actually
+# achieves it for a call within one repo.
 
 on:
   pull_request:
@@ -13,4 +23,4 @@ on:
 
 jobs:
   control-plane-integrity:
-    uses: aerodeck-ai/.github/.github/workflows/control-plane-integrity.yml@main
+    uses: ./.github/workflows/control-plane-integrity.yml
