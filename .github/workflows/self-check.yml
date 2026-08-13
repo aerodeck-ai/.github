@@ -13,13 +13,24 @@ name: self-check
 # was caught live: the first two attempts used @main and both runs
 # completed with zero jobs ("workflow file issue") instead of exercising
 # the checker, silently NOT wargaming the gate despite looking like a
-# pass/fail check-run. Local ref lets this PR validate itself before merge,
-# same intent as ci.yml's bootstrap note but the mechanism that actually
-# achieves it for a call within one repo.
+# pass/fail check-run.
+#
+# permissions: this repo's default workflow token is read-only
+# (default_workflow_permissions=read); the called workflow requests
+# pull-requests: write (to request review / comment on block), which
+# exceeds a read-only token and fails closed with startup_failure unless
+# explicitly granted here — reusable-workflow permissions are capped by
+# the CALLER's grant, not just the callee's own request. Caught live: the
+# first local-ref run resolved the reusable workflow correctly but still
+# failed with startup_failure until this block was added.
 
 on:
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   control-plane-integrity:
