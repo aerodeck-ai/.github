@@ -58,24 +58,21 @@ jobs:
           # Bootstrap-only exception: for aerodeck-ai/.github itself, before
           # this gate's own first merge, main has no
           # scripts/check-control-plane-integrity.mjs yet, so the fetch
-          # 404s. Caught live: that 404 JSON body was written straight to
-          # the .mjs file and executed as a script, crashing with
-          # "SyntaxError: Unexpected token ':'" instead of ever running the
-          # checker. Falling back to the copy actions/checkout already put
-          # in the workspace preserves the anti-tamper property (the file
-          # main lacks can't have been tampered with on main) while letting
-          # this repo validate its own gate pre-merge.
-          curl -sSL -f -H "authorization: Bearer ${GITHUB_TOKEN}" \
+          # 404s. Caught live: the first attempt used curl -f and the 404
+          # made curl exit immediately with no output file, so the fallback
+          # branch below never ran either — check the HTTP status
+          # explicitly instead of relying on curl's own failure behavior.
+          HTTP_CODE=$(curl -sSL -w '%{http_code}' -H "authorization: Bearer ${GITHUB_TOKEN}" \
             -H "accept: application/vnd.github.raw" \
             "https://api.github.com/repos/aerodeck-ai/.github/contents/scripts/check-control-plane-integrity.mjs?ref=main" \
-            -o check-control-plane-integrity.mjs
-          if [ -s check-control-plane-integrity.mjs ] && ! grep -q '"message": "Not Found"' check-control-plane-integrity.mjs; then
+            -o check-control-plane-integrity.mjs)
+          if [ "$HTTP_CODE" = "200" ] && [ -s check-control-plane-integrity.mjs ]; then
             echo "using checker from main"
           elif [ -s scripts/check-control-plane-integrity.mjs ]; then
-            echo "main has no checker yet (pre-first-merge bootstrap) — using the checked-out copy"
+            echo "main has no checker yet (HTTP $HTTP_CODE) — pre-first-merge bootstrap, using the checked-out copy"
             cp scripts/check-control-plane-integrity.mjs check-control-plane-integrity.mjs
           else
-            echo "::error::no checker script available on main or in the checkout" >&2
+            echo "::error::no checker script available on main (HTTP $HTTP_CODE) or in the checkout" >&2
             exit 1
           fi
           test -s check-control-plane-integrity.mjs
