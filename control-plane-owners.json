@@ -1,0 +1,5 @@
+{
+  "$doc": "Reference config for control-plane-integrity.yml. Repos calling the reusable gate may drop a copy of this file (with their own protectedGlobs added) at their own root to extend coverage for repo-specific runner/deploy/gate config. The built-in ALWAYS_PROTECTED_GLOBS in scripts/check-control-plane-integrity.mjs (workflows dir, CODEOWNERS, gate manifests, scripts/check-*.mjs) apply regardless of this file's presence.",
+  "owners": ["henryberliand-design", "stillmusic-tech"],
+  "protectedGlobs": []
+}

@@ -1,0 +1,16 @@
+name: self-check
+
+# Wires this repo's own control-plane-integrity gate onto itself, so this
+# repo (the org's sole enforcement mechanism for all 66 others) cannot be
+# self-altered any more freely than the repos it protects. Bootstraps
+# against @main the same way every calling repo does — this PR's own run
+# won't see itself until it merges, matching the existing pattern (ci.yml's
+# own header documents the identical bootstrap shape).
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  control-plane-integrity:
+    uses: aerodeck-ai/.github/.github/workflows/control-plane-integrity.yml@main

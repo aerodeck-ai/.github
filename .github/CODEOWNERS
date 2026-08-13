@@ -1,0 +1,13 @@
+# CODEOWNERS — this org's shared control-plane repo.
+#
+# This repo hosts the reusable gates every other aerodeck-ai repo calls
+# (ci.yml — minimum functional build/typecheck/test; control-plane-integrity.yml —
+# protects gate config from self-alteration, CI-TOPOLOGY A5). A PR that edits
+# these files IS an edit to the org's sole enforcement mechanism — require
+# review from a control-plane owner. "Require review from Code Owners" is
+# enabled on this repo's main branch protection.
+
+/.github/workflows/  @henryberliand-design @stillmusic-tech
+/.github/CODEOWNERS  @henryberliand-design @stillmusic-tech
+/scripts/            @henryberliand-design @stillmusic-tech
+/control-plane-owners.json  @henryberliand-design @stillmusic-tech
