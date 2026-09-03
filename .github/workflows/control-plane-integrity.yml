@@ -1,0 +1,82 @@
+name: control-plane integrity
+
+# CI-TOPOLOGY A5, second half (R3). Companion to ci.yml — that one is the
+# minimum functional build/typecheck/test-if-present gate; this one protects
+# the control plane itself (workflows, gate manifests, CODEOWNERS, gate
+# checker scripts) from self-alteration, closing the class of bypass proven
+# exploitable by aerodeck-template PR #1936 (merged via a bot with zero human
+# reviews, touching a gate checker script) and named NEGATIVE-WORKFLOW /
+# NEGATIVE-RENAME in the row that filed this gate.
+#
+# Called by a repo with:
+#   jobs:
+#     control-plane-integrity:
+#       uses: aerodeck-ai/.github/.github/workflows/control-plane-integrity.yml@main
+#
+# A calling repo extends coverage for its own runner/deploy config by adding
+# a control-plane-owners.json at its root (see scripts/check-control-plane-integrity.mjs
+# for the schema); the built-in protected globs (.github/workflows/**,
+# CODEOWNERS, gate manifests, scripts/check-*.mjs) always apply regardless.
+#
+# checkout uses fetch-depth: 0 so the checker's `git fetch origin <base>` /
+# `git show FETCH_HEAD:...` (reading the PROTECTED CONFIG from the base
+# branch, not the PR's own copy — a PR can't widen its own escape hatch in
+# the same change) has real history to work with.
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+  pull-requests: write # to request a review from a control-plane owner on block
+
+concurrency:
+  group: control-plane-integrity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  control-plane-integrity:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: fetch the shared checker
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # Deliberately fetch the checker from THIS repo's main (not the PR's
+          # own working tree): a malicious PR to a repo this gate protects
+          # must not be able to rewrite the checker that judges it in the same
+          # change. This holds for every calling repo, whose main always
+          # already has the script.
+          #
+          # Bootstrap-only exception: for aerodeck-ai/.github itself, before
+          # this gate's own first merge, main has no
+          # scripts/check-control-plane-integrity.mjs yet, so the fetch
+          # 404s. Caught live: the first attempt used curl -f and the 404
+          # made curl exit immediately with no output file, so the fallback
+          # branch below never ran either — check the HTTP status
+          # explicitly instead of relying on curl's own failure behavior.
+          HTTP_CODE=$(curl -sSL -w '%{http_code}' -H "authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/aerodeck-ai/.github/contents/scripts/check-control-plane-integrity.mjs?ref=main" \
+            -o check-control-plane-integrity.mjs)
+          if [ "$HTTP_CODE" = "200" ] && [ -s check-control-plane-integrity.mjs ]; then
+            echo "using checker from main"
+          elif [ -s scripts/check-control-plane-integrity.mjs ]; then
+            echo "main has no checker yet (HTTP $HTTP_CODE) — pre-first-merge bootstrap, using the checked-out copy"
+            cp scripts/check-control-plane-integrity.mjs check-control-plane-integrity.mjs
+          else
+            echo "::error::no checker script available on main (HTTP $HTTP_CODE) or in the checkout" >&2
+            exit 1
+          fi
+          test -s check-control-plane-integrity.mjs
+      - name: check control-plane surfaces
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node check-control-plane-integrity.mjs
