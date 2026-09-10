@@ -50,6 +50,18 @@ on:
         type: boolean
         default: false
         required: false
+      skip-if-docs-only:
+        description: >-
+          Opt in to the build-irrelevant skip (jiddlers#488, estate-work#2680). On a pull request
+          the job runs the CALLING repository's own scripts/check-docs-only.mjs against the merge
+          base; when it reports docs-only, install and tests are skipped and the job says so in
+          its own words, still reporting success so a required context resolves. The decision is
+          the caller's one script, never a second definition here (#2390). If the caller has no
+          such script the step fails closed and everything runs. Off by default: callers that do
+          not pass this see byte-identical behaviour.
+        type: boolean
+        default: false
+        required: false
 
 jobs:
   test:
@@ -57,11 +69,45 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The classifier below diffs against the merge base; a shallow clone makes it fail
+          # closed and run everything (aerodeck-template#2465). Full history only when opted in.
+          fetch-depth: ${{ inputs.skip-if-docs-only && '0' || '1' }}
+
+      # Is this diff worth installing for? Only when the caller opted in, only on a pull request,
+      # and only by the caller's own scripts/check-docs-only.mjs (jiddlers#488). Absent script,
+      # empty or unparseable diff: not docs-only, everything below runs.
+      - name: is this diff build-irrelevant?
+        id: docs_only
+        if: inputs.skip-if-docs-only && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ ! -f scripts/check-docs-only.mjs ]; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "not docs-only: this repository has no scripts/check-docs-only.mjs; running the full gate."
+            exit 0
+          fi
+          git fetch -q origin "${{ github.event.pull_request.base.ref }}"
+          node scripts/check-docs-only.mjs \
+            "origin/${{ github.event.pull_request.base.ref }}" \
+            "${{ github.event.pull_request.head.sha }}"
+
+      # A skip must never read like a pass (the 2026-08-10 lesson, kept in every gate).
+      - name: say plainly that nothing needed installing or testing
+        if: steps.docs_only.outputs.docs_only == 'true'
+        shell: bash
+        run: |
+          echo "BUILD-IRRELEVANT SKIP (jiddlers#488) - this diff changes nothing the product is built from."
+          echo "Install and tests were not run. This is NOT a passing test run."
+          echo "### BUILD-IRRELEVANT SKIP" >> "$GITHUB_STEP_SUMMARY"
+          echo "Prose-only diff by the calling repository's scripts/check-docs-only.mjs; install and tests not run." >> "$GITHUB_STEP_SUMMARY"
 
       # Detect rather than assume. A repo with no package.json and no pyproject.toml has no suite
       # this workflow knows how to run, and saying so is the point.
       - name: Detect suite
         id: detect
+        if: steps.docs_only.outputs.docs_only != 'true'
         shell: bash
         run: |
           set -uo pipefail
@@ -86,13 +132,13 @@ jobs:
           echo "Detected: kind=$kind cmd=${cmd:-<none>}"
 
       - name: Setup Node
-        if: steps.detect.outputs.kind == 'node'
+        if: steps.docs_only.outputs.docs_only != 'true' && steps.detect.outputs.kind == 'node'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
 
       - name: Install (node)
-        if: steps.detect.outputs.kind == 'node'
+        if: steps.docs_only.outputs.docs_only != 'true' && steps.detect.outputs.kind == 'node'
         shell: bash
         run: npm ci || npm install
 
@@ -102,7 +148,7 @@ jobs:
       # runner's system Python — the runner is shared across all repos and must stay clean.
       # The venv is named with a leading dot so pytest's default norecursedirs ('.*') skips it.
       - name: Install (python)
-        if: steps.detect.outputs.kind == 'python' || steps.detect.outputs.kind == 'explicit'
+        if: steps.docs_only.outputs.docs_only != 'true' && (steps.detect.outputs.kind == 'python' || steps.detect.outputs.kind == 'explicit')
         shell: bash
         run: |
           set -uo pipefail
@@ -135,7 +181,7 @@ jobs:
           head -40 .ci-venv/installed.txt || true
 
       - name: Run tests
-        if: steps.detect.outputs.kind != 'none'
+        if: steps.docs_only.outputs.docs_only != 'true' && steps.detect.outputs.kind != 'none'
         shell: bash
         run: |
           if [ -d .ci-venv ]; then . .ci-venv/bin/activate; fi
@@ -143,7 +189,7 @@ jobs:
 
       # The honest-board step. No suite => this is NOT a pass.
       - name: No suite — report UNTESTED
-        if: steps.detect.outputs.kind == 'none'
+        if: steps.docs_only.outputs.docs_only != 'true' && steps.detect.outputs.kind == 'none'
         shell: bash
         run: |
           echo "### UNTESTED" >> "$GITHUB_STEP_SUMMARY"
