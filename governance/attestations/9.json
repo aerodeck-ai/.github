@@ -1,0 +1,14 @@
+{
+  "schema": "governance-admission/v1",
+  "kind": "verified",
+  "issue": 9,
+  "repo": "aerodeck-ai/.github",
+  "covers_sha": "e9f3e0e013aa0574bdd467c35447df197f2b62a2",
+  "frozen_ac_source": "issue:9#governance-acs",
+  "frozen_ac_hash": "sha256:9aef51bf2a0e4588fc16b206c7bb16f950be0ccd1c1499177aabea2b55df5f0b",
+  "verifier": "claude:independent-attestor/co-off-.github",
+  "executor": "claude:sonnet-5.5/co-off-.github",
+  "ruling_id": "ruling-344",
+  "verified_at": "2026-10-04T09:16:45Z",
+  "evidence": "aerodeck-ai/.github#9 AC1-AC3 verified on this head: the diff deletes only .github/CODEOWNERS (git diff --name-status origin/main...e9f3e0e013aa0574bdd467c35447df197f2b62a2) and adds the attestation; no workflow, held-path input or setting changes. File deletion, no generated code. Umbrella aerodeck-ai/estate-work#5260."
+}
