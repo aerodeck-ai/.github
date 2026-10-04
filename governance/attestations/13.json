@@ -1,0 +1,14 @@
+{
+  "schema": "governance-admission/v1",
+  "kind": "verified",
+  "issue": 13,
+  "repo": "aerodeck-ai/.github",
+  "covers_sha": "43c17c088ac28427e8419d6c04bf9a9d69962ff3",
+  "frozen_ac_source": "issue:13",
+  "frozen_ac_hash": "sha256:f55342efcb90e694c0f57f7b5848df592c1773582e385b02e5913f3f3ab0e7d6",
+  "verifier": "model:claude-opus-5-5/pr-backlog-13",
+  "executor": "claude:sonnet-5-5/pr-backlog-13",
+  "ruling_id": "ruling-194",
+  "verified_at": "2026-10-04T17:56:03Z",
+  "evidence": "Built by Claude (ruling lane-build-model-limits). Cold read-only review by a separate Claude Opus session, round 1: no blocking findings (AC1-AC3, AC5 met on the tree)."
+}
