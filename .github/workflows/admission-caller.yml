@@ -1,0 +1,23 @@
+# admission-caller: the thin per-repo caller for the reusable admission gate in aerodeck-ai/governance.
+# Added by the delivery network slice S9 (Henry ruling admission-caller-onboarding-unchecked-repos,
+# 4 Oct 2026). The `permissions:` block is load-bearing: the called workflow's jobs cannot ask for
+# more than this job grants, and a missing grant is a silent startup_failure.
+# required_contexts names the OTHER required check job ids that must be green before the verifier
+# approves; empty means only the gate's own result matters. Add this repo's test and lint job ids
+# here when it has them. held_paths names paths only Henry may change; empty means none.
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+  checks: read
+
+jobs:
+  admission:
+    uses: aerodeck-ai/governance/.github/workflows/admission.yml@main
+    with:
+      required_contexts: ""
+      held_paths: ""
