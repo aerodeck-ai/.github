@@ -1,0 +1,87 @@
+# Shared secret gate (reusable). Blocks NEW secrets on a pull request: it scans only the commits the PR adds
+# (base..head), with `--redact` so no value reaches the job log. Server-side, so --no-verify cannot skip it.
+#
+# Why it exists (21 Oct 2026, estate-work#7635, scope estate-fanout-no-checkins-20261021): 77 of 85 aerodeck-ai
+# repositories had no secret scan at all, and agents printed live secrets into their own output three times that day.
+# One shared definition means a fix to the scan reaches every repository at once. infra keeps its own gitleaks.yml
+# (same pinned binary, runs on ci-priority).
+#
+# Caller (each repository carries this, nothing else):
+#   jobs:
+#     gitleaks:
+#       if: ${{ !github.event.pull_request.draft }}
+#       uses: aerodeck-ai/.github/.github/workflows/gitleaks.yml@main
+#       with: { runner: ci-aeros }
+name: gitleaks
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label the repository already uses for CI.
+        type: string
+        default: ci-aeros
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks (pinned, checksum verified)
+        run: |
+          set -euo pipefail
+          if command -v gitleaks >/dev/null 2>&1 && [ "$(gitleaks version)" = "8.28.0" ]; then
+            gitleaks version
+            exit 0
+          fi
+          V=8.28.0
+          case "$(uname -m)" in
+            x86_64)        ARCH=x64;   SHA=a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb ;;
+            aarch64|arm64) ARCH=arm64; SHA=eff65261156100e5d94a6b3dec313d532fddfe19ae1590bf7a2b4f2699128356 ;;
+            *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
+          esac
+          mkdir -p "$HOME/.local/bin"
+          # estate-work#5678: one lost download used to fail this required check, and a re-run of the same
+          # commit then passed (10 such pairs from 29 Sep to 7 Oct). The download and its checksum are tried
+          # up to four times with waits of 5, 15 and 45 seconds. A file that never matches the pinned sha256
+          # is never installed, so the job still fails and no unverified binary runs. The scan below is not retried.
+          GL_DIR="${GL_TMP:-/tmp}"
+          fetched=false
+          for pause in 0 5 15 45; do
+            if [ "$pause" -gt 0 ]; then sleep "$pause"; fi
+            rm -f "${GL_DIR}/gl.tgz"
+            if curl -fsSL --connect-timeout 15 --max-time 60 -o "${GL_DIR}/gl.tgz" \
+                 "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_${ARCH}.tar.gz" \
+               && echo "${SHA}  ${GL_DIR}/gl.tgz" | sha256sum -c -; then
+              fetched=true
+              break
+            fi
+            echo "gitleaks download or checksum failed (attempt after a ${pause} s wait)" >&2
+          done
+          if [ "$fetched" != true ]; then
+            echo "gitleaks ${V} could not be fetched and verified after 4 attempts" >&2
+            exit 1
+          fi
+          tar xzf "${GL_DIR}/gl.tgz" -C "${GL_DIR}" gitleaks
+          install -m755 "${GL_DIR}/gitleaks" "$HOME/.local/bin/gitleaks"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/gitleaks" version
+
+      - name: Scan the commits this pull request adds
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          echo "scanning ${BASE_SHA}..${HEAD_SHA}"
+          gitleaks git --no-banner --redact --verbose --exit-code 1 \
+            --log-opts="${BASE_SHA}..${HEAD_SHA}" .
